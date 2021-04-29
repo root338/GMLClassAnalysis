@@ -14,10 +14,15 @@ enum ClassType {
 
 struct ClassInfo {
     let type: ClassType
-}
-
-struct ClassCodeBlockInfo {
-    let type: ClassType
     let className: String
     let extensionName: String?
+    let superClassName: String?
 }
+
+struct OCClaseStruct {
+    let info: ClassInfo?
+    let propertys: [(info: PropertyStruct, range: FileTextRange)]?
+    let methods: [(info: OCMethodStruct, range: FileTextRange)]?
+//    let pragmaMarks: [FileTextRange]?
+}
+
