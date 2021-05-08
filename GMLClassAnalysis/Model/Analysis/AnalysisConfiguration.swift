@@ -79,15 +79,15 @@ struct ClassAnalysisConfiguration {
 //    /// 获取方法
 //    var isGetMethod: Bool
     /// 属性详细解析配置
-    var propertyAnalysisConfiguration: PropertyAnalysisConfiguration?
+    var property: PropertyAnalysisConfiguration?
     /// 方法详细解析配置
-    var methodAnalysisConfiguration: MethodAnalysisConfiguration?
+    var method: MethodAnalysisConfiguration?
     
     static var `default`: ClassAnalysisConfiguration {
         return ClassAnalysisConfiguration(
             isGetClassInfo: true,
-            propertyAnalysisConfiguration: nil,
-            methodAnalysisConfiguration: nil
+            property: nil,
+            method: nil
         )
     }
 }

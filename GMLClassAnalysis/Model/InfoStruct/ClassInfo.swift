@@ -18,11 +18,20 @@ struct ClassInfo {
     let extensionName: String?
     let superClassName: String?
 }
+struct ClassInfoRange {
+    
+    let type: GMLTextInfoRange
+    let name: GMLTextInfoRange?
+    let extensionName: GMLTextInfoRange?
+    let superClassName: GMLTextInfoRange?
+}
 
 struct OCClaseStruct {
+    typealias PropertyTextInfo = (info: PropertyInfo?, range: FileTextRange)
+//    let info: ClassDetailInfo?
     let info: ClassInfo?
-    let propertys: [(info: PropertyStruct, range: FileTextRange)]?
-    let methods: [(info: OCMethodStruct, range: FileTextRange)]?
+    let propertys: [PropertyTextInfo]?
+    let methods: [(info: OCMethodStruct?, range: FileTextRange)]?
 //    let pragmaMarks: [FileTextRange]?
 }
 

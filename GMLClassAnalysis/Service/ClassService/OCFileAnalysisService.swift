@@ -7,7 +7,9 @@
 
 import Foundation
 
-// 参考链接 https://m.aliyun.com/yunqi/ask/16378/
+// 正则表达式参考链接 https://m.aliyun.com/yunqi/ask/16378/
+
+/// OC 文件解析服务
 class OCFileAnalysisService: NSObject {
     //MARK:- Find File Info
     // 查找导入头文件
@@ -46,6 +48,10 @@ class OCFileAnalysisService: NSObject {
         let pattern = "\\{([^\\{\\}]|(\\{[^\\{\\}]*\\}))*\\}"
         return try! NSRegularExpression(pattern: pattern)
     }()
+    lazy var findParadigmRE: NSRegularExpression = {
+        let pattern = "<((?!>).)*>"
+        return try! NSRegularExpression(pattern: pattern)
+    }()
     
     //MARK:- Class Info
     // 查找类/扩展的头部信息
@@ -66,6 +72,16 @@ class OCFileAnalysisService: NSObject {
         let pattern = ":\\s*\\([a-zA-Z0-9_]*\\s*\\)"
         return try! NSRegularExpression(pattern: pattern)
     }()
+    //MARK:- Property Info
+    lazy var findPropertyTypeRE: NSRegularExpression = {
+        let pattern = "(@property|@synthesize|@dynamic)"
+        return try! NSRegularExpression(pattern: pattern)
+    }()
+    lazy var findPropertyUnitRE: NSRegularExpression = {
+        let pattern = "\\([\\sa-zA-Z0-9,_]+\\)"
+        return try! NSRegularExpression(pattern: pattern)
+    }()
+    
 }
 
 //MARK:- File Analysis
@@ -125,7 +141,7 @@ extension OCFileAnalysisService {
                 let classContent = String(content[range])
                 classStruct = OCClaseStruct(
                     info: config.isGetClassInfo ? self.classInfo(content: classContent) : nil,
-                    propertys: nil,
+                    propertys: config.property != nil ? self.propertyStruct(content: classContent, configuration: config.property) : nil,
                     methods: nil
                 )
             }
@@ -134,80 +150,68 @@ extension OCFileAnalysisService {
         return classInfos
     }
 }
-
+//MARK:- Property Analysis
 extension OCFileAnalysisService {
-    typealias CodeResult = (codes: [String], ranges: [Range<String.Index>])
+    /// 解析指定文本的属性
+    func propertyStruct(content: String, configuration: PropertyAnalysisConfiguration? = nil) -> [(info: PropertyInfo?, range: FileTextRange)] {
+        var propertyInfos = [(info: PropertyInfo?, range: FileTextRange)]()
+        findPropertyRE.enumerateMatches(in: content, options: [], range: content.rangeAll) { (textCheckingResult, _, _) in
+            guard let result = textCheckingResult else { return }
+            guard let range = Range(result.range, in: content) else { return }
+            var propertys: [PropertyInfo]?
+            if configuration != nil {
+                let text = String(content[range])
+                propertys = propertyInfo(content: text)
+            }
+            if let list = propertys, list.count > 1 {
+                assert(false, "\(list) 为数组的情况下没有处理")
+            }else {
+                propertyInfos.append((propertys?.first, range))
+            }
+        }
+        return propertyInfos
+    }
     
-    /// 获取全部有意义的代码
-    /// - Returns: code: 表示有意义的代码, ranges 表示注释
-    func fullCode(content: String) -> (fullCode: String, noteRanges: [Range<String.Index>]) {
-        var noteRanges = [Range<String.Index>]()
-        var previousRange: Range<String.Index>? = nil
-        var fullCodeContent = String()
-        findNoteRE.enumerateMatches(in: content, options: .reportCompletion, range: content.rangeAll) { (textCheckingResult, _, _) in
-            guard let result = textCheckingResult else { return }
-            guard let range = Range(result.range, in: content) else { return }
-            noteRanges.append(range)
-            let codeRange = (previousRange?.upperBound ?? content.startIndex) ..< range.lowerBound
-            fullCodeContent.append(String(content[codeRange]))
-            previousRange = range
+    /// 合并同一个类下的同属性内容
+    /// - Returns: 返回一个字典 [类名： [属性名：属性内容]]
+    func mergeProperty<T>(list: [T], analysisClass: (T) -> OCClaseStruct?) -> [String: [PropertyInfo]] {
+        var dict = [String: [String: PropertyInfo]]()
+        for item in list {
+            guard let classStruct = analysisClass(item) else { continue }
+            let className = classStruct.info?.className ?? ""
+            guard let propertys = classStruct.propertys else { continue }
+            var propertyDict = dict[className] ?? [String: PropertyInfo]()
+            
+            for propertyInfo in propertys {
+                guard let info = propertyInfo.info else { continue }
+                let propertyName = info.name
+                propertyDict[propertyName] = propertyDict[propertyName]?.merge(info: info) ?? info
+            }
+            dict[className] = propertyDict
         }
-        if let lastRange = previousRange {
-            fullCodeContent.append(String(content[lastRange.upperBound ..< content.endIndex]))
+        var resultDict = [String: [PropertyInfo]]()
+        for (key, value) in dict {
+            resultDict[key] = Array(value.values)
         }
-        return (fullCodeContent, noteRanges)
+        return resultDict
     }
-}
-extension OCFileAnalysisService {
-    func classCode(content: String) -> CodeResult {
-        var classCodes = [String]()
-        var classCodeRanges = [Range<String.Index>]()
-        findClassRE.enumerateMatches(in: content, options: .reportCompletion, range: content.rangeAll) { (textCheckingResult, _, _) in
-            guard let result = textCheckingResult else { return }
-            guard let range = Range(result.range, in: content) else { return }
-            classCodes.append(String(content[range]))
-            classCodeRanges.append(range)
-        }
-        return (classCodes, classCodeRanges)
-    }
-//    func classCodeInfo(content: String) -> (codeInfo: ClassCodeBlockInfo, range: Range<String.Index>)? {
-//        var codeInfo: ClassCodeBlockInfo?
-//        var mRange: Range<String.Index>?
-//
-//        findClassNameRE.enumerateMatches(in: content, options: .reportCompletion, range: content.rangeAll) { (textCheckingResult, _, _) in
-//            guard let result = textCheckingResult else { return }
-//            guard let range = Range(result.range, in: content) else { return }
-//            mRange = range
-//            codeInfo = classInfo(content: String(content[range]))
+//    func fullPropertyList(fileInfo: ClassFileStruct) {
+//        
+//        for obj in fileInfo.classStructs {
+//            guard let classInfo = obj.info else { continue }
+//            guard let propertyInfoList = classInfo.propertys, !propertyInfoList.isEmpty else { continue }
+//            for info in propertyInfoList {
+//                guard let propertyInfo = info.info else { continue }
+//                
+//            }
 //        }
-//        if codeInfo == nil { return nil }
-//        return (codeInfo!, mRange!)
 //    }
 }
 
 //MARK:- Private Analysis
 fileprivate extension OCFileAnalysisService {
-//    func classInfo(content: String) -> ClassCodeBlockInfo? {
-//        let arr = content.split { (char) -> Bool in
-//            return char == " " || char == "\n"
-//        }
-//        let type: ClassType = arr[0] == "@interface" ? .interface : .implementation
-//        let className = String(arr[1])
-//        var extensionName: String?
-//        var mark = false
-//        for i in 2 ..< arr.count {
-//            let text = arr[i]
-//            if mark {
-//                extensionName = String(text == ")" ? "" : text)
-//                break
-//            }
-//            if text == "(" {
-//                mark = true
-//            }
-//        }
-//        return ClassCodeBlockInfo(type: type, className: className, extensionName: extensionName)
-//    }
     
+    /// 解析类的基础信息
     func classInfo(content: String) -> ClassInfo? {
         guard let classInfo = findClassInfoRE.firstMatch(in: content) else { return nil }
         guard let (classMarkStr, range) = findClassTypeRE.firstMatch(in: classInfo.str) else { return nil }
@@ -242,5 +246,86 @@ fileprivate extension OCFileAnalysisService {
             extensionName: extensionInfo?.str,
             superClassName: superClassInfo?.str
         )
+    }
+    /// 属性解析
+    /// 不支持 block 的解析
+    func propertyInfo(content: String) -> [PropertyInfo]? {
+        let codeText = try! content.remove(pattern: ";").deleteBlankCharacter
+        guard let typeInfo = findPropertyTypeRE.firstMatch(in: codeText) else { return nil }
+//        let type: PropertyType!
+        var units: PropertyUnit = []
+        var startIndex = typeInfo.range.upperBound
+        switch typeInfo.str {
+        case "@property":
+//            type = .property
+            if var unitText = findPropertyUnitRE.firstMatch(in: codeText) {
+                unitText.str = try! unitText.str.remove(pattern: "(\\s|\\(|\\))")
+                let unitStrSet = unitText.str.split(separator: ",")
+                for unitStr in unitStrSet {
+                    let _unit = PropertyUnit(rawValue: String(unitStr))
+                    units.insert(_unit)
+                }
+                startIndex = unitText.range.upperBound
+            }
+        case "@synthesize":
+//            type = .synthesize
+            var synthesizeValue = String(codeText[typeInfo.range.upperBound ..< codeText.endIndex])
+            synthesizeValue = try! synthesizeValue.remove(pattern: "\\s")
+            let synthesizeSet = synthesizeValue.split(separator: ",")
+            var propertySet = [PropertyInfo]()
+            for str in synthesizeSet {
+                if str.count == 0 { continue }
+                let equalMark = "="
+                let tmpStr = String(str)
+                guard let name = tmpStr.substring(to: equalMark, includeMark: false),
+                      !name.isEmpty,
+                      let variableName = tmpStr.substring(from: equalMark, includeMark: false),
+                      !variableName.isEmpty
+                      else { continue }
+                propertySet.append(
+                    PropertyInfo(name: name, instanceVariableName: variableName)
+                )
+            }
+            return propertySet
+        case "@dynamic":
+//            type = .dynamic
+            var dynamicValue = String(codeText[typeInfo.range.upperBound ..< codeText.endIndex])
+            dynamicValue = try! dynamicValue.remove(pattern: "\\s")
+            let dynamicStrSet = dynamicValue.split(separator: ",")
+            var propertySet = [PropertyInfo]()
+            for str in dynamicStrSet {
+                if str.isEmpty { continue }
+                propertySet.append(PropertyInfo(name: String(str)))
+            }
+            return propertySet
+        default:
+            return nil
+        }
+        let variableStr = String(codeText[startIndex ..< codeText.endIndex]).deleteBlankCharacter
+        var name = String()
+        var className = String()
+        for (index, char) in variableStr.reversed().enumerated() {
+            if (char == "*" || char == " " || char == "\n") && !name.isEmpty {
+                className = variableStr.substring(to: variableStr.count - index) ?? ""
+                break
+            }
+            name.insert(char, at: name.startIndex)
+        }
+        if name.isEmpty || className.isEmpty { return nil }
+        let isExistPointerMark = className.hasSuffix("*")
+        if isExistPointerMark {
+            className.removeLast()
+            className = className.deleteBlankCharacter
+        }
+        let actualClassName = className.substring(to: "<", includeMark: false) ?? className
+        let declarClassName = className.substring(to: "<")
+        return [PropertyInfo(
+            unit: units,
+            name: name,
+            className: className,
+            declarClassName: declarClassName,
+            actualClassName: actualClassName,
+            isExistPointerMark: isExistPointerMark
+        )]
     }
 }
